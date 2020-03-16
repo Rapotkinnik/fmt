@@ -106,7 +106,10 @@ struct is_range_<
 /// tuple_size and tuple_element check.
 template <typename T> class is_tuple_like_ {
   template <typename U>
-  static auto check(U* p) -> decltype(std::tuple_size<U>::value, int());
+  static auto check(U* p)
+      -> decltype(std::tuple_size<U>::value,
+                  (void)std::declval<typename std::tuple_element<0, U>::type>(),
+                  int());
   template <typename> static void check(...);
 
  public:
@@ -382,6 +385,51 @@ arg_join<internal::iterator_t<const std::initializer_list<T>>, wchar_t> join(
   return join(std::begin(list), std::end(list), sep);
 }
 
+/**
+  \rst
+  Returns an object that formats `range` with elements formated by `formater` and separated by `sep`.
+
+  **Example**::
+
+	std::vector<std::pair<int, string>> vec{
+      {1, "first"},
+      {2, "second"},
+	};
+    fmt::print("({})", fmt::join(vec, " | ", [const auto &elem] {
+	   return fmt::format("{} = {}", elem.second, elem.first);
+	}));
+    // Output: "(first = 1 | second = 2)"
+  \endrst
+ */
+template <typename Range, typename Callable>
+arg_join_func<internal::iterator_t<const Range>, Callable, char> join(const Range& range,
+                                                       string_view sep, Callable func) {
+  return join_func(std::begin(range), std::end(range), func, sep);
+}
+
+template <typename Range, typename Callable>
+arg_join_func<internal::iterator_t<const Range>, Callable, wchar_t> join(const Range& range,
+                                                          wstring_view sep, Callable func) {
+  return join_func(std::begin(range), std::end(range), func, sep);
+}
+
+/**
+  \rst
+  Returns an object that formats `range` with elements formated by `formater` and separated by `sep`.
+
+  **Example**::
+
+	std::vector<std::pair<int, string>> vec{
+      {1, "first"},
+      {2, "second"},
+	};
+    fmt::print("({{name} = {value}:.2f..., })", vec, [const auto &elem] {
+	   return fmt::format("{} = {}", elem.second, elem.first);
+	}));
+    // Output: "(first = 1 | second = 2)"
+  \endrst
+ */
+ 
 FMT_END_NAMESPACE
 
 #endif  // FMT_RANGES_H_

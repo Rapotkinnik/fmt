@@ -45,10 +45,9 @@ TEST(RangesTest, FormatPair) {
 }
 
 TEST(RangesTest, FormatTuple) {
-  std::tuple<int64_t, float, std::string, char> t{42, 1.5f, "this is tuple",
-                                                  'i'};
-  EXPECT_EQ("(42, 1.5, \"this is tuple\", 'i')", fmt::format("{}", t));
-  EXPECT_EQ("()", fmt::format("{}", std::tuple<>()));
+  std::tuple<int64_t, float, std::string, char> tu1{42, 1.5f, "this is tuple",
+                                                    'i'};
+  EXPECT_EQ("(42, 1.5, \"this is tuple\", 'i')", fmt::format("{}", tu1));
 }
 
 TEST(RangesTest, JoinTuple) {
@@ -139,4 +138,17 @@ struct string_like {
 TEST(RangesTest, FormatStringLike) {
   EXPECT_EQ("foo", fmt::format("{}", string_like()));
 }
+
 #endif  // FMT_USE_STRING_VIEW
+
+TEST(RangesTest, FormatVectorOfPairs) {
+  std::vector<std::pair<int, std::string>> vec {
+    std::make_pair(1, "first"),
+	std::make_pair(2, "second")
+  };
+  
+  auto result = fmt::format("{}", fmt::join(vec, " | ", [] (const auto &elem) {
+    return fmt::format("({} = {})", elem.second, elem.first);
+  }));
+  EXPECT_EQ("(first = 1) | (second = 2)",  result);
+}

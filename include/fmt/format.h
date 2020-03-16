@@ -71,7 +71,7 @@
 #  else
 #    define FMT_FALLTHROUGH
 #  endif
-#elif FMT_HAS_CPP17_ATTRIBUTE(fallthrough) || \
+#elif (FMT_HAS_CPP_ATTRIBUTE(fallthrough) && (__cplusplus >= 201703)) || \
     (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
 #  define FMT_FALLTHROUGH [[fallthrough]]
 #else
@@ -482,7 +482,7 @@ inline size_t count_code_points(basic_string_view<char> s) {
   return num_code_points;
 }
 
-inline size_t count_code_points(basic_string_view<char8_type> s) {
+inline size_t count_code_points(basic_string_view<char8_t> s) {
   return count_code_points(basic_string_view<char>(
       reinterpret_cast<const char*>(s.data()), s.size()));
 }
@@ -494,8 +494,8 @@ inline size_t code_point_index(basic_string_view<Char> s, size_t n) {
 }
 
 // Calculates the index of the nth code point in a UTF-8 string.
-inline size_t code_point_index(basic_string_view<char8_type> s, size_t n) {
-  const char8_type* data = s.data();
+inline size_t code_point_index(basic_string_view<char8_t> s, size_t n) {
+  const char8_t* data = s.data();
   size_t num_code_points = 0;
   for (size_t i = 0, size = s.size(); i != size; ++i) {
     if ((data[i] & 0xc0) != 0x80 && ++num_code_points > n) {
@@ -505,13 +505,13 @@ inline size_t code_point_index(basic_string_view<char8_type> s, size_t n) {
   return s.size();
 }
 
-inline char8_type to_char8_t(char c) { return static_cast<char8_type>(c); }
+inline char8_t to_char8_t(char c) { return static_cast<char8_t>(c); }
 
 template <typename InputIt, typename OutChar>
 using needs_conversion = bool_constant<
     std::is_same<typename std::iterator_traits<InputIt>::value_type,
                  char>::value &&
-    std::is_same<OutChar, char8_type>::value>;
+    std::is_same<OutChar, char8_t>::value>;
 
 template <typename OutChar, typename InputIt, typename OutputIt,
           FMT_ENABLE_IF(!needs_conversion<InputIt, OutChar>::value)>
@@ -555,22 +555,20 @@ class buffer_range : public internal::output_range<
       : internal::output_range<iterator, T>(std::back_inserter(buf)) {}
 };
 
-class FMT_DEPRECATED u8string_view
-    : public basic_string_view<internal::char8_type> {
+class FMT_DEPRECATED u8string_view : public basic_string_view<char8_t> {
  public:
   u8string_view(const char* s)
-      : basic_string_view<internal::char8_type>(
-            reinterpret_cast<const internal::char8_type*>(s)) {}
+      : basic_string_view<char8_t>(reinterpret_cast<const char8_t*>(s)) {}
   u8string_view(const char* s, size_t count) FMT_NOEXCEPT
-      : basic_string_view<internal::char8_type>(
-            reinterpret_cast<const internal::char8_type*>(s), count) {}
+      : basic_string_view<char8_t>(reinterpret_cast<const char8_t*>(s), count) {
+  }
 };
 
 #if FMT_USE_USER_DEFINED_LITERALS
 inline namespace literals {
-FMT_DEPRECATED inline basic_string_view<internal::char8_type> operator"" _u(
-    const char* s, std::size_t n) {
-  return {reinterpret_cast<const internal::char8_type*>(s), n};
+FMT_DEPRECATED inline basic_string_view<char8_t> operator"" _u(const char* s,
+                                                               std::size_t n) {
+  return {reinterpret_cast<const char8_t*>(s), n};
 }
 }  // namespace literals
 #endif
@@ -1953,6 +1951,10 @@ template <typename Char, typename ErrorHandler>
 FMT_CONSTEXPR int parse_nonnegative_int(const Char*& begin, const Char* end,
                                         ErrorHandler&& eh) {
   FMT_ASSERT(begin != end && '0' <= *begin && *begin <= '9', "");
+  if (*begin == '0') {
+    ++begin;
+    return 0;
+  }
   unsigned value = 0;
   // Convert to unsigned to prevent a warning.
   constexpr unsigned max_int = max_value<int>();
@@ -2307,11 +2309,7 @@ FMT_CONSTEXPR const Char* parse_arg_id(const Char* begin, const Char* end,
     return begin;
   }
   if (c >= '0' && c <= '9') {
-    int index = 0;
-    if (c != '0')
-      index = parse_nonnegative_int(begin, end, handler);
-    else
-      ++begin;
+    int index = parse_nonnegative_int(begin, end, handler);
     if (begin == end || (*begin != '}' && *begin != ':'))
       handler.on_error("invalid format string");
     else
@@ -3231,6 +3229,38 @@ struct formatter<arg_join<It, Char>, Char>
   }
 };
 
+template <typename It, typename Func, typename Char> struct arg_join_func : internal::view {
+  It begin;
+  It end;
+  Func func;
+  basic_string_view<Char> sep;
+
+  arg_join_func(It b, It e, Func f, basic_string_view<Char> s) : begin(b), end(e), func(f), sep(s) {}
+};
+
+
+template <typename It, typename Func, typename Char>
+struct formatter<arg_join_func<It, Func, Char>, Char>
+    : formatter<std::string, Char> {
+  template <typename FormatContext>
+  auto format(const arg_join_func<It, Func, Char>& value, FormatContext& ctx)
+      -> decltype(ctx.out()) {
+    using base = formatter<std::string, Char>;
+    auto it = value.begin;
+    auto out = ctx.out();
+    if (it != value.end) {
+      out = base::format(value.func(*it++), ctx);
+      while (it != value.end) {
+        out = std::copy(value.sep.begin(), value.sep.end(), out);
+        ctx.advance_to(out);
+        out = base::format(value.func(*it++), ctx);
+      }
+    }
+    return out;
+  }
+};
+
+
 /**
   Returns an object that formats the iterator range `[begin, end)` with elements
   separated by `sep`.
@@ -3243,6 +3273,20 @@ arg_join<It, char> join(It begin, It end, string_view sep) {
 template <typename It>
 arg_join<It, wchar_t> join(It begin, It end, wstring_view sep) {
   return {begin, end, sep};
+}
+
+/**
+  Returns an object that formats the iterator range `[begin, end)` with elements
+  separated by `sep`.
+ */
+template <typename It, typename Func>
+arg_join_func<It, Func, char> join_func(It begin, It end, Func func, string_view sep) {
+  return {begin, end, func, sep};
+}
+
+template <typename It, typename Func>
+arg_join_func<It, Func, wchar_t> join_func(It begin, It end, Func func, wstring_view sep) {
+  return {begin, end, func, sep};
 }
 
 /**
@@ -3551,7 +3595,7 @@ FMT_END_NAMESPACE
     /* Use a macro-like name to avoid shadowing warnings. */ \
     struct FMT_COMPILE_STRING : fmt::compile_string {        \
       using char_type = fmt::remove_cvref_t<decltype(*s)>;   \
-      FMT_MAYBE_UNUSED __VA_ARGS__ FMT_CONSTEXPR             \
+      __VA_ARGS__ FMT_CONSTEXPR                              \
       operator fmt::basic_string_view<char_type>() const {   \
         /* FMT_STRING only accepts string literals. */       \
         return fmt::internal::literal_to_view(s);            \
